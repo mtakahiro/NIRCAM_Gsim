@@ -59,6 +59,22 @@ def dispersed_pixel(x0s,y0s,f0,order,C,ID,oversample_factor=2,extrapolate_SED=Fa
     x0 = np.mean(x0s)
     y0 = np.mean(y0s)
 
+    '''
+    # TM: remove those out of NIRISS POM:
+    # Turned out those are already cut.
+    try:
+        rpom = C.rpom #200 # in pixel. Can be updated.
+    except:
+        with fits.open(C.POM) as fin:
+            POM_mask = fin[1].data
+            C.rpom = (POM_mask.shape[0]-2048)/2.
+            C.ymax_pom = POM_mask.shape[0]
+            C.xmax_pom = POM_mask.shape[1]
+    if (x0 < -C.rpom) or (x0 > C.xmax_pom) or (y0 < -C.rpom) or (y0 > C.ymax_pom):
+        print('Source out of POM. Skippng')
+        return np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),0
+    '''
+
     dx0s = [t-x0 for t in x0s]
     dy0s = [t-y0 for t in y0s]
     
@@ -136,5 +152,7 @@ def dispersed_pixel(x0s,y0s,f0,order,C,ID,oversample_factor=2,extrapolate_SED=Fa
     vg = (xs>=0) & (ys>=0)
 
     if len(xs[vg])==0:
-        return np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),0
+        #return np.array([0]),np.array([0]),np.array([0]),np.array([0]),np.array([0]),0
+        # TM: so it will be ignored.
+        return np.array([-1]),np.array([-1]),np.array([0]),np.array([0]),np.array([0]),0
     return xs[vg], ys[vg], areas[vg], lams[vg], counts[vg], ID
