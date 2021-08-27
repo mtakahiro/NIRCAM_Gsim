@@ -661,7 +661,7 @@ class observation():
                         self.cached_object[c]['maxy'].append(maxy)
             
         time2 = time.time()
-
+        print('Mp Done in %dsec',time2-time1)
         return this_object
 
     def disperse_chunk(self,c):
