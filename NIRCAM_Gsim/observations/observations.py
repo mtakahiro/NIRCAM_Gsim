@@ -344,7 +344,8 @@ class observation():
                 self.cached_object[i]['miny'] = []
                 self.cached_object[i]['maxy'] = []
 
-            this_object = self.disperse_chunk(i)
+            # TM;
+            #this_object = self.disperse_chunk(i)
 
             if self.SBE_save != None:
                 # If SBE_save is enabled, we create an HDF5 file containing the stamp of this simulated object
@@ -378,6 +379,9 @@ class observation():
                     dset.attrs[u'miny'] = miny
                     dset.attrs[u'maxy'] = maxy
                     dset.attrs[u'units'] = 'e-/s'
+
+        # TM; run disperser;
+        self.disperse_chunk_all()
 
 
     def disperse_background_1D(self,background):
@@ -492,6 +496,173 @@ class observation():
         xs2 = np.arange(np.min(xs),np.max(xs),dw)
         ys2 = fct2(xs2)
         return xs2,ys2
+
+    def disperse_chunk_all(self):
+        """
+        """
+        import time
+
+        if self.SED_file!=None:
+            # We use an input spectrum file
+            with h5py.File(self.SED_file,'r') as h5f:
+                pars = []
+                for c in tqdm(range(len(self.IDs)),desc='Accumurating pars...'):
+                    ID = int(self.seg[self.ys[c][0],self.xs[c][0]])
+
+                    tmp = h5f["%s" % (ID)][:]
+
+                    if self.resample:
+                        
+
+                        # Figuring out a few things about size of order, dispersion and wavelengths to use    
+                        wmin = self.C.WRANGE[self.order][0]
+                        wmax = self.C.WRANGE[self.order][1]
+
+                        t0 = self.C.INVDISPL(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,wmin)
+                        t1 = self.C.INVDISPL(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,wmax)
+                        
+                        dx0 = self.C.DISPX(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,t0) - self.C.DISPX(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,t1)
+                        dx1 = self.C.DISPY(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,t0) - self.C.DISPY(self.order,self.C.NAXIS[0]/2,self.C.NAXIS[1]/2,t1)
+
+                        dw = np.abs((wmax-wmin)/(dx1-dx0))
+                        print("Smoothing and resampling input spectrum to {} micron".format(dw))
+                        # print("self.SED_file:",self.SED_file)
+                        # print("lams:",tmp[0])
+                        # print(tmp[0][1:]-tmp[0][:-1])
+                        # print("DW:",dw)
+
+                        tmp = self.smooth(tmp[0],tmp[1],dw/1.5)
+                        #print(len(tmp[0]),len(tmp[1]))
+                        
+                    
+                    ok = (tmp[0]>self.C.WRANGE[self.order][0]) & (tmp[0]<self.C.WRANGE[self.order][1])                        
+                    tmp = [tmp[0][ok],tmp[1][ok]]
+
+                    for i in range(len(self.xs[c])):
+                        
+                        lams = tmp[0]
+                        fffs = tmp[1]*self.fs["SED"][c][i]
+    
+                        # trim input spectrum 
+                        # try:
+                        #     ok = (lams>self.C.WRANGE["+1"][0]) & (lams<self.C.WRANGE["+1"][1])
+                        # except:
+                        #     ok = (lams>self.C.WRANGE["A"][0]) & (lams<self.C.WRANGE["A"][1])
+
+                        # ok = (lams>self.C.WRANGE[self.order][0]) & (lams<self.C.WRANGE[self.order][1])                        
+                        # lams = lams[ok]
+                        # fffs = fffs[ok]
+                        #print(len(lams))
+                        #sys.exit(1)
+                        if self.POM_mask is not None:
+                            POM_value = self.POM_mask[self.ys[c][i],self.xs[c][i]]
+                        else:
+                            POM_value = 1.
+                        if POM_value>=10000:
+                            #print("Applying additional transmission of :",self.xs[c][i],self.ys[c][i],POM_value)
+                            trans = self.POM_transmission[POM_value](lams)
+                            fffs = fffs * trans
+                        else:
+                            fffs = fffs * POM_value
+
+                        f = [lams,fffs]
+                        xs0 = [self.xs[c][i],self.xs[c][i]+1,self.xs[c][i]+1,self.xs[c][i]]
+                        ys0 = [self.ys[c][i],self.ys[c][i],self.ys[c][i]+1,self.ys[c][i]+1]
+                        pars.append([xs0,ys0,f,self.order,self.C,ID,self.extrapolate_SED,self.xstart,self.ystart])
+
+        else:
+            # No spectrum passed
+            pars = []
+            for c in tqdm(range(len(self.IDs)),desc='Accumurating pars...'):
+                for i in range(len(self.xs[c])):
+                    ID = i
+                    xs0 = [self.xs[c][i],self.xs[c][i]+1,self.xs[c][i]+1,self.xs[c][i]]
+                    ys0 = [self.ys[c][i],self.ys[c][i],self.ys[c][i]+1,self.ys[c][i]+1]
+                    lams = np.array(list(self.fs.keys()))
+                    flxs = np.array([self.fs[l][c][i] for l in self.fs.keys()])
+                    ok = flxs!=0 # We avoid any pixel containing pure 0's
+                    if len(flxs[ok])==0: continue
+                    flxs = flxs[ok]
+                    lams = lams[ok]
+                    ok = np.argsort(lams)
+                    flxs = flxs[ok]
+                    lams = lams[ok]
+
+                    if self.POM_mask is not None:
+                        POM_value = self.POM_mask[self.ys[c][i],self.xs[c][i]]
+                    else:
+                        POM_value = 1.
+                    if POM_value>10000:
+                        #print("Applying additional transmission of :",self.xs[c][i],self.ys[c][i],POM_value)
+                        trans = self.POM_transmission[POM_value](lams)
+                        flxs = flxs * trans
+                    else:
+                        flxs = flxs * POM_value
+
+                    f = [lams,flxs]
+                    pars.append([xs0,ys0,f,self.order,self.C,ID,self.extrapolate_SED,self.xstart,self.ystart])
+        
+        time1 = time.time()
+
+        this_object = np.zeros(self.dims,np.float)
+        chunksize = int(len(pars)/self.max_cpu)
+        if chunksize<1:
+            chunksize = 1
+
+        chunksize = 10
+        #print(len(pars),self.max_cpu,chunksize)
+        if self.multiprocessor=='ray':
+#            ray.init(num_cpus=self.max_cpu,ignore_reinit_error=True)
+
+            chunked_pars = [pars[i * chunksize:(i + 1) * chunksize] for i in range((len(pars) + chunksize - 1) // chunksize )] 
+
+            result_ids = []
+            [result_ids.append(mega_helper.remote(cpars)) for cpars in chunked_pars]
+            
+            results = ray.get(result_ids)
+            results = [item for sublist in results for item in sublist]
+
+            del result_ids
+            #ray.shutdown()
+        else:
+            with multiprocessing.Pool(processes=self.max_cpu) as mypool:
+                for pp in mypool.imap_unordered(helper, pars, chunksize=chunksize):
+                    if np.shape(pp.transpose())==(1,6):
+                        continue
+        
+                    x,y,w,f = pp[0],pp[1],pp[3],pp[4]
+
+                    vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+
+                    x = x[vg]
+                    y = y[vg]
+                    f = f[vg]
+                    w = w[vg]
+                        
+                    if len(x)<1:
+                        continue
+                        
+                    minx = int(min(x))
+                    maxx = int(max(x))
+                    miny = int(min(y))
+                    maxy = int(max(y))
+                    a = sparse.coo_matrix((f, (y-miny, x-minx)), shape=(maxy-miny+1,maxx-minx+1)).toarray()
+                    self.simulated_image[miny:maxy+1,minx:maxx+1] = self.simulated_image[miny:maxy+1,minx:maxx+1] + a
+                    this_object[miny:maxy+1,minx:maxx+1] = this_object[miny:maxy+1,minx:maxx+1] + a
+
+                    if self.cache:
+                        self.cached_object[c]['x'].append(x)
+                        self.cached_object[c]['y'].append(y)
+                        self.cached_object[c]['f'].append(f)
+                        self.cached_object[c]['w'].append(w)
+                        self.cached_object[c]['minx'].append(minx)
+                        self.cached_object[c]['maxx'].append(maxx)
+                        self.cached_object[c]['miny'].append(miny)
+                        self.cached_object[c]['maxy'].append(maxy)
+            
+        time2 = time.time()
+
+        return this_object
 
     def disperse_chunk(self,c):
         """Method that handles the dispersion. To be called after create_pixel_list()"""
