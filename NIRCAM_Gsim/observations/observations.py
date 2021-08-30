@@ -332,7 +332,8 @@ class observation():
         
         self.create_pixel_list()
         
-        for i in tqdm(range(len(self.IDs)),desc='Dispersing...'):
+        #for i in tqdm(range(len(self.IDs)),desc='Dispersing...'):
+        for i in range(len(self.IDs)):
             if self.cache:
                 self.cached_object[i] = {}
                 self.cached_object[i]['x'] = []
@@ -661,7 +662,7 @@ class observation():
                         self.cached_object[c]['maxy'].append(maxy)
             
         time2 = time.time()
-        print('Mp Done in %dsec',time2-time1)
+        print('Mp Done in %dsec'%(time2-time1))
         return this_object
 
     def disperse_chunk(self,c):
