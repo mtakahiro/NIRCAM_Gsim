@@ -57,7 +57,7 @@ def helper(vars):
 class observation():
     # This class defines an actual observations. It is tied to a single flt and a single config file
     
-    def __init__(self,direct_images,segmentation_data,config,mod="A",order="+1",plot=0,max_split=100,SED_file=None,extrapolate_SED=False,max_cpu=-1,ID=0,SBE_save=None, boundaries=[], renormalize=True, resample=True, multiprocessor='multiprocessing'):
+    def __init__(self,direct_images,segmentation_data,config,mod="A",order="+1",plot=0,max_split=100,SED_file=None,extrapolate_SED=False,max_cpu=-1,ID=0,SBE_save=None, boundaries=[], renormalize=True, resample=True, multiprocessor='multiprocessing', dir_multi=None, seg_multi=None):
         """direct_images: List of file name containing direct imaging data
         segmentation_data: an array of the size of the direct images, containing 0 and 1's, 0 being pixels to ignore
         config: The path and name of a GRISMCONF NIRCAM configuration file
@@ -165,6 +165,10 @@ class observation():
         self.p_l = []
         self.p_a = []
 
+        # TM
+        self.seg_multi = seg_multi
+        self.dir_multi = dir_multi
+
 
     def apply_POM(self):
         """Account for the finite size of the POM and remove pixels in segmentation files which should not
@@ -248,20 +252,44 @@ class observation():
         #sys.exit(1)
     def create_pixel_list(self):
         # Create a list of pixels to dispersed, grouped per object ID
-        if self.ID==0:
+        if self.ID==0: # Register all
             self.xs = []
             self.ys = []
+            self.seg_multi_mask = []
             all_IDs = np.array(list(set(np.ravel(self.seg))))
             all_IDs = all_IDs[all_IDs>0]
             print("We have ",len(all_IDs),"Objects")
-            for ID in all_IDs:
-                ys,xs = np.nonzero(self.seg==ID)
+            # TM
+            flag_seg_multi = False
+            if not self.seg_multi == None:
+                fd_seg_multi = fits.open(self.seg_multi)
+                hd_seg_multi = fits.open(self.seg_multi)
+                flag_seg_multi = True
 
+            for ID in all_IDs:
+
+                # TM
+                if flag_seg_multi:
+                    fd_seg_ind = fd_seg_multi['%d'%ID].data
+                    y0,x0 = int(hd_seg_multi['%d'%ID].header['y0']),int(hd_seg_multi['%d'%ID].header['x0'])
+                    y1,x1 = y0+fd_seg_ind.shape[0],x0+fd_seg_ind.shape[1]
+
+                    array = np.where((fd_seg_ind==ID) & (self.seg[y0:y1,x0:x1]>0))
+                    self.seg_multi_mask.append(array)
+                    ys,xs = array[0],array[1]
+                    ys += y0
+                    xs += x0
+                else:
+                    ys,xs = np.nonzero(self.seg==ID)
+
+                #ys,xs = np.nonzero(self.seg==ID)
                 if (len(xs)>0) & (len(ys)>0):
                     self.xs.append(xs)
                     self.ys.append(ys)
-                    self.IDs = all_IDs
-        else:
+            # TM    
+            self.IDs = all_IDs
+                    
+        else: # If only specific ID. I don't expect overlap in seg.
             vg = self.seg==self.ID
             ys,xs = np.nonzero(vg)            
            
@@ -291,6 +319,10 @@ class observation():
             except:
                 d = fits.open(dir_image)[0].data
 
+            # TM
+            if not self.dir_multi == None:
+                d_multi = fits.open(self.dir_multi)
+
             # If we do not use an SED file then we use photometry to get fluxes
             # Otherwise, we assume that objects are normalized to 1.
             if self.SED_file==None:
@@ -301,25 +333,36 @@ class observation():
                 for i in range(len(self.IDs)):
                     self.fs[l].append(dnew[self.ys[i],self.xs[i]] * photflam)
             else:
+                self.fs["SED"] = []
                 # Need to normalize the object stamps              
-                for ID in tqdm(self.IDs,desc='Normalizing objects footprint'):
-                    vg = self.seg==ID
-                    dnew = d
+                for cc,ID in enumerate(tqdm(self.IDs,desc='Normalizing objects footprint')):
+                    # TM
+                    #vg = self.seg==ID
+                    vg = self.seg_multi_mask[cc]
                     
                     if self.renormalize is True:
-                        sum_seg = np.sum(dnew[vg]) # But normalize by the whole flux
-                        if sum_seg!=0.:
-                            dnew[vg] = dnew[vg]/sum_seg
+                        # TM
+                        if not dir_image == None:
+                            dnew = d_multi['%d'%ID].data[:,:]                            
+                            sum_seg = np.sum(dnew) # But normalize by the whole flux
+                            y0,x0 = int(d_multi['%d'%ID].header['y0']),int(d_multi['%d'%ID].header['x0'])
+                            if sum_seg!=0.:
+                                dnew /= sum_seg
+                            self.fs["SED"].append(dnew[self.ys[cc]-y0,self.xs[cc]-x0])
+                        else:
+                            dnew = d * self.POM_mask01 # Apply POM transmission mask to the data pixels
+                            sum_seg = np.sum(dnew[vg]) # But normalize by the whole flux
+                            if sum_seg!=0.:
+                                dnew[vg] = dnew[vg]/sum_seg
+                            self.fs["SED"].append(dnew[self.ys[cc],self.xs[cc]])
                     else:
                         print("not re-normalizing sources to unity")
 
-                    if self.POM_mask01 is not None:
-                        #print("Applying POM transmission to data")
-                        dnew = dnew * self.POM_mask01 # Apply POM transmission mask to the data pixels. This is a single grey correction for the whole object.
+                        if self.POM_mask01 is not None:
+                            #print("Applying POM transmission to data")
+                            dnew = dnew * self.POM_mask01 # Apply POM transmission mask to the data pixels. This is a single grey correction for the whole object.
 
-                self.fs["SED"] = []
-                for i in range(len(self.IDs)):
-                    self.fs["SED"].append(dnew[self.ys[i],self.xs[i]])
+                        self.fs["SED"].append(dnew[self.ys[cc],self.xs[cc]])
     
     def disperse_all(self,cache=False):
 
@@ -508,7 +551,9 @@ class observation():
             with h5py.File(self.SED_file,'r') as h5f:
                 pars = []
                 for c in tqdm(range(len(self.IDs)),desc='Accumurating pars...'):
-                    ID = int(self.seg[self.ys[c][0],self.xs[c][0]])
+                    # TM
+                    #ID = int(self.seg[self.ys[c][0],self.xs[c][0]])
+                    ID = self.IDs[c]
 
                     tmp = h5f["%s" % (ID)][:]
 
@@ -611,6 +656,7 @@ class observation():
             chunksize = 1
 
         chunksize = 10
+        print('There are %d pars'%(len(pars)))
         #print(len(pars),self.max_cpu,chunksize)
         if self.multiprocessor=='ray':
 #            ray.init(num_cpus=self.max_cpu,ignore_reinit_error=True)

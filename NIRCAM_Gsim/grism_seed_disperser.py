@@ -13,7 +13,7 @@ import observation as Gsim_observation
 from multiprocessing import cpu_count 
     
 class Grism_seed():
-    def __init__(self,image_seeds,cross_filter,mode,config_path=".",extrapolate_SED=False,SED_file=None,instrument="NIRCAM",max_cpu=None, SBE_save=None, renormalize=True, resample=False):
+    def __init__(self,image_seeds,cross_filter,mode,config_path=".",extrapolate_SED=False,SED_file=None,instrument="NIRCAM",max_cpu=None, SBE_save=None, renormalize=True, resample=False, dir_multi=None, seg_multi=None):
         """A class for a grism simulation
 
         Attributes
@@ -84,6 +84,10 @@ class Grism_seed():
         self.renormalize = renormalize
         self.resample = resample
 
+        # TM
+        self.dir_multi = dir_multi
+        self.seg_multi = seg_multi
+
     def observation(self,orders=None,max_split=-1000,ID=0):
         """Sets up an observation.
 
@@ -111,7 +115,7 @@ class Grism_seed():
             
         for order in self.orders:
             boundaries = [self.xstart,self.xend,self.ystart,self.yend]
-            self.this_one[order] = Gsim_observation(self.image_seeds,self.seg_data,self.config,order=order,max_split=max_split,extrapolate_SED=self.extrapolate_SED,SED_file=self.SED_file,max_cpu=self.max_cpu,ID=ID, SBE_save=self.SBE_save,boundaries=boundaries,renormalize=self.renormalize,resample=self.resample)
+            self.this_one[order] = Gsim_observation(self.image_seeds,self.seg_data,self.config,order=order,max_split=max_split,extrapolate_SED=self.extrapolate_SED,SED_file=self.SED_file,max_cpu=self.max_cpu,ID=ID, SBE_save=self.SBE_save,boundaries=boundaries,renormalize=self.renormalize,resample=self.resample,dir_multi=self.dir_multi,seg_multi=self.seg_multi)
             #self.this_one[order].disperse_all()
 
     def disperse(self,orders=None,cache=False,trans=None):
