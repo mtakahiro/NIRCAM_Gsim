@@ -541,8 +541,10 @@ class observation():
         ys2 = fct2(xs2)
         return xs2,ys2
 
-    def disperse_chunk_all(self):
+    def disperse_chunk_all(self,nmax=10000):
         """
+        nmax : int
+            maximum number of pars elements for each MP, to avoid memory crash.
         """
         import time
 
@@ -655,7 +657,8 @@ class observation():
         if chunksize<1:
             chunksize = 1
 
-        chunksize = 10
+        # TM;
+        #chunksize = 10
         print('There are %d pars'%(len(pars)))
         #print(len(pars),self.max_cpu,chunksize)
         if self.multiprocessor=='ray':
@@ -672,43 +675,60 @@ class observation():
             del result_ids
             #ray.shutdown()
         else:
-            with multiprocessing.Pool(processes=self.max_cpu) as mypool:
-                for pp in mypool.imap_unordered(helper, pars, chunksize=chunksize):
-                    if np.shape(pp.transpose())==(1,6):
-                        continue
-        
-                    x,y,w,f = pp[0],pp[1],pp[3],pp[4]
+            npars = int(len(pars)/nmax) + 1
+            nend = 0
+            for nn in tqdm(range(npars), desc='Executing MP on each pars element...'):
+                if nn == npars-1:
+                    epars = pars[nend:]
+                else:
+                    epars = pars[nend:nn*nmax]
 
-                    vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+                chunksize = int(len(epars)/self.max_cpu)
+                if chunksize<1:
+                    chunksize = 1
 
-                    x = x[vg]
-                    y = y[vg]
-                    f = f[vg]
-                    w = w[vg]
-                        
-                    if len(x)<1:
-                        continue
-                        
-                    minx = int(min(x))
-                    maxx = int(max(x))
-                    miny = int(min(y))
-                    maxy = int(max(y))
-                    a = sparse.coo_matrix((f, (y-miny, x-minx)), shape=(maxy-miny+1,maxx-minx+1)).toarray()
-                    self.simulated_image[miny:maxy+1,minx:maxx+1] = self.simulated_image[miny:maxy+1,minx:maxx+1] + a
-                    this_object[miny:maxy+1,minx:maxx+1] = this_object[miny:maxy+1,minx:maxx+1] + a
+                with multiprocessing.Pool(processes=self.max_cpu) as mypool:
+                    for pp in mypool.imap_unordered(helper, epars, chunksize=chunksize):
+                        if np.shape(pp.transpose())==(1,6):
+                            continue
+            
+                        x,y,w,f = pp[0],pp[1],pp[3],pp[4]
 
-                    if self.cache:
-                        self.cached_object[c]['x'].append(x)
-                        self.cached_object[c]['y'].append(y)
-                        self.cached_object[c]['f'].append(f)
-                        self.cached_object[c]['w'].append(w)
-                        self.cached_object[c]['minx'].append(minx)
-                        self.cached_object[c]['maxx'].append(maxx)
-                        self.cached_object[c]['miny'].append(miny)
-                        self.cached_object[c]['maxy'].append(maxy)
+                        vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+
+                        x = x[vg]
+                        y = y[vg]
+                        f = f[vg]
+                        w = w[vg]
+                            
+                        if len(x)<1:
+                            continue
+                            
+                        minx = int(min(x))
+                        maxx = int(max(x))
+                        miny = int(min(y))
+                        maxy = int(max(y))
+                        a = sparse.coo_matrix((f, (y-miny, x-minx)), shape=(maxy-miny+1,maxx-minx+1)).toarray()
+                        #self.simulated_image[miny:maxy+1,minx:maxx+1] = self.simulated_image[miny:maxy+1,minx:maxx+1] + a
+                        this_object[miny:maxy+1,minx:maxx+1] += a
+
+                        if self.cache:
+                            self.cached_object[c]['x'].append(x)
+                            self.cached_object[c]['y'].append(y)
+                            self.cached_object[c]['f'].append(f)
+                            self.cached_object[c]['w'].append(w)
+                            self.cached_object[c]['minx'].append(minx)
+                            self.cached_object[c]['maxx'].append(maxx)
+                            self.cached_object[c]['miny'].append(miny)
+                            self.cached_object[c]['maxy'].append(maxy)
             
         time2 = time.time()
-        print('Mp Done in %dsec'%(time2-time1))
+
+        # TM;
+        # This should be okay
+        self.simulated_image[:,:] += this_object[:,:]
+
+        print('All Mp Done in %dsec'%(time2-time1))
         return this_object
 
     def disperse_chunk(self,c):
