@@ -376,8 +376,8 @@ class observation():
         
         self.create_pixel_list()
         
-        #for i in tqdm(range(len(self.IDs)),desc='Dispersing...'):
-        for i in range(len(self.IDs)):
+        for i in tqdm(range(len(self.IDs)),desc='Dispersing...'):
+        #for i in range(len(self.IDs)):
             if self.cache:
                 self.cached_object[i] = {}
                 self.cached_object[i]['x'] = []
@@ -389,7 +389,7 @@ class observation():
                 self.cached_object[i]['miny'] = []
                 self.cached_object[i]['maxy'] = []
 
-            #this_object = self.disperse_chunk(i)
+            this_object = self.disperse_chunk(i)
 
             if self.SBE_save != None:
                 # If SBE_save is enabled, we create an HDF5 file containing the stamp of this simulated object
@@ -425,7 +425,7 @@ class observation():
                     dset.attrs[u'units'] = 'e-/s'
 
         # TM; run disperser;
-        self.disperse_chunk_all()
+        #self.disperse_chunk_all()
 
 
     def disperse_background_1D(self,background):
@@ -541,7 +541,7 @@ class observation():
         ys2 = fct2(xs2)
         return xs2,ys2
 
-    def disperse_chunk_all(self,nmax=10000):
+    def disperse_chunk_all(self,nmax=1000):
         """
         nmax : int
             maximum number of pars elements for each MP, to avoid memory crash.
@@ -683,18 +683,22 @@ class observation():
                 else:
                     epars = pars[nend:nn*nmax]
 
-                chunksize = int(len(epars)/self.max_cpu)
+                chunksize = int(len(epars)/self.max_cpu) + 1
+                print('Splitting epar into %d chunks'%chunksize)
                 if chunksize<1:
                     chunksize = 1
 
                 with multiprocessing.Pool(processes=self.max_cpu) as mypool:
+                    # ,maxtasksperchild=1000??
                     for pp in mypool.imap_unordered(helper, epars, chunksize=chunksize):
                         if np.shape(pp.transpose())==(1,6):
                             continue
             
                         x,y,w,f = pp[0],pp[1],pp[3],pp[4]
 
-                        vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+                        # TM;
+                        #vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0])
+                        vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) & (f>0)
 
                         x = x[vg]
                         y = y[vg]
@@ -839,7 +843,9 @@ class observation():
         if chunksize<1:
             chunksize = 1
 
-        chunksize = 10
+        # TM;
+        #chunksize = 10
+
         #print(len(pars),self.max_cpu,chunksize)
         if self.multiprocessor=='ray':
 #            ray.init(num_cpus=self.max_cpu,ignore_reinit_error=True)
@@ -862,7 +868,9 @@ class observation():
         
                     x,y,w,f = pp[0],pp[1],pp[3],pp[4]
 
-                    vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+                    # TM;
+                    #vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) 
+                    vg = (x>=0) & (x<self.dims[1]) & (y>=0) & (y<self.dims[0]) & (f>0) 
 
                     x = x[vg]
                     y = y[vg]
@@ -876,9 +884,10 @@ class observation():
                     maxx = int(max(x))
                     miny = int(min(y))
                     maxy = int(max(y))
+                    # TM;
                     a = sparse.coo_matrix((f, (y-miny, x-minx)), shape=(maxy-miny+1,maxx-minx+1)).toarray()
-                    self.simulated_image[miny:maxy+1,minx:maxx+1] = self.simulated_image[miny:maxy+1,minx:maxx+1] + a
-                    this_object[miny:maxy+1,minx:maxx+1] = this_object[miny:maxy+1,minx:maxx+1] + a
+                    #self.simulated_image[miny:maxy+1,minx:maxx+1] = self.simulated_image[miny:maxy+1,minx:maxx+1] + a
+                    this_object[miny:maxy+1,minx:maxx+1] += a
 
                     if self.cache:
                         self.cached_object[c]['x'].append(x)
@@ -890,6 +899,8 @@ class observation():
                         self.cached_object[c]['miny'].append(miny)
                         self.cached_object[c]['maxy'].append(maxy)
             
+
+        self.simulated_image[:,:] += this_object[:,:]
         time2 = time.time()
 
         return this_object
