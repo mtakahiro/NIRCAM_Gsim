@@ -16,6 +16,7 @@ from tqdm import tqdm
 import psutil
 import h5py
 import asdf
+import sys
 
 class interp1d_picklable(object):
     """ class wrapper for piecewise linear function
@@ -743,7 +744,9 @@ class observation():
             # We use an input spectrum file
             with h5py.File(self.SED_file,'r') as h5f:
                 pars = []
-                ID = int(self.seg[self.ys[c][0],self.xs[c][0]])
+                # TM;
+                #ID = int(self.seg[self.ys[c][0],self.xs[c][0]])
+                ID = self.IDs[c]
 
                 tmp = h5f["%s" % (ID)][:]
 
